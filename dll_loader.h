@@ -1,5 +1,14 @@
 ﻿#pragma once
 
-char* CustomLoadLibrary(const char* dllPath);
+struct DllInfo
+{
+	void* pDll;
+	int size;
+	DWORD originalImageBase;
+};
 
-char* GetFunctionAddrByName(char* pImageBuffer, const char* functionName);
+DllInfo* CustomLoadLibrary(const char* dllPath);
+
+void* GetFunctionAddrByName(DllInfo* pDllInfo, const char* functionName);
+
+int FreeLibrary(DllInfo* pDllInfo);

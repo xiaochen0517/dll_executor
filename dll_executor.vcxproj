@@ -78,7 +78,7 @@
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <SupportJustMyCode>false</SupportJustMyCode>
-      <BufferSecurityCheck>false</BufferSecurityCheck>
+      <BufferSecurityCheck>true</BufferSecurityCheck>
       <BasicRuntimeChecks>Default</BasicRuntimeChecks>
     </ClCompile>
     <Link>

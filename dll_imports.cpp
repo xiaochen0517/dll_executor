@@ -164,7 +164,7 @@ FARPROC ResolveForwardedExport(const std::string& forwardedInfo)
 	return pFunctionInfo->functionAddress;
 }
 
-void LoadImportsAndIAT(char* pImageBuffer)
+int LoadImportsAndIAT(char* pImageBuffer)
 {
     printf("开始进行导入表解析...\n");
 
@@ -182,7 +182,7 @@ void LoadImportsAndIAT(char* pImageBuffer)
         if (functionList.empty())
         {
             cout << "获取导入 DLL 的函数列表失败" << endl;
-            exit(1);
+            return 1;  // 返回错误代码而不是调用 exit()
         }
 
         DWORD changeCount = 0;
@@ -218,7 +218,7 @@ void LoadImportsAndIAT(char* pImageBuffer)
                     if (realFunctionAddress == NULL)
                     {
                         printf("\n    ✗ 错误: 解析转发导出失败\n");
-                        exit(1);
+                        return 1;  // 返回错误代码而不是调用 exit()
                     }
                     printf(" -> 实际地址: 0x%X", (DWORD)realFunctionAddress);
                     pThunkData->u1.Function = (DWORD)realFunctionAddress;
@@ -233,11 +233,12 @@ void LoadImportsAndIAT(char* pImageBuffer)
             else
             {
                 printf("\n    ✗ 错误: 未找到函数\n");
-                exit(1);
+                return 1;  // 返回错误代码而不是调用 exit()
             }
         }
 
         printf("已解析 DLL: %s, 导入函数数量: %d\n\n", dllName, changeCount);
         pImportDescriptor++;
     }
+    return 0;  // 成功返回 0
 }

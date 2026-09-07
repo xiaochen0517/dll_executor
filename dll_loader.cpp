@@ -43,7 +43,7 @@ void FileBuffer2ImageBuffer(char* pFileBuffer, char* pImageBuffer)
 /**
  * 加载DLL文件到镜像缓冲区
  */
-char* LoadDll2ImageBuffer(const char* dllPath)
+DllInfo* LoadDll2ImageBuffer(const char* dllPath)
 {
 	FILE* pFile;
 	fopen_s(&pFile, dllPath, "rb");
@@ -66,7 +66,8 @@ char* LoadDll2ImageBuffer(const char* dllPath)
 	memset(pBuffer, 0, size);
 	fread_s(pBuffer, size, 1, size, pFile);
 	// 将文件缓冲区转换为镜像缓冲区
-	char* pImageBuffer = (char*)malloc(GetSizeOfImage(pBuffer));
+	DWORD sizeOfImage = GetSizeOfImage(pBuffer);
+	char* pImageBuffer = (char*)malloc(sizeOfImage);
 	if (pImageBuffer == NULL)
 	{
 		cout << "Failed to allocate memory for image buffer." << endl;
@@ -81,7 +82,15 @@ char* LoadDll2ImageBuffer(const char* dllPath)
 
 	fclose(pFile);
 	free(pBuffer);
-	return pImageBuffer;
+	DllInfo* pDllInfo = (DllInfo*)malloc(sizeof(DllInfo));
+	pDllInfo->pDll = pImageBuffer;
+	pDllInfo->size = sizeOfImage;
+	// 保存原始的 ImageBase，用于后续释放内存时恢复保护属性
+	IMAGE_DOS_HEADER* pDosHeader = (IMAGE_DOS_HEADER*)pImageBuffer;
+	IMAGE_NT_HEADERS32* pNtHeaders = (IMAGE_NT_HEADERS32*)(pImageBuffer + pDosHeader->e_lfanew);
+	IMAGE_OPTIONAL_HEADER32* pOptionalHeader = &pNtHeaders->OptionalHeader;
+	pDllInfo->originalImageBase = pOptionalHeader->ImageBase;
+	return pDllInfo;
 }
 
 void ChangeRelocationTable(char* pImageBuffer)
@@ -131,7 +140,8 @@ void MemVirtualProtect(char* pImageBuffer)
 		DWORD oldProtect = 0;
 		DWORD protect = 0;
 		DWORD sectionHeaderCharacteristics = pSectionHeader[i].Characteristics;
-		if (sectionHeaderCharacteristics& IMAGE_SCN_MEM_EXECUTE)
+
+		if (sectionHeaderCharacteristics & IMAGE_SCN_MEM_EXECUTE)
 		{
 			if (sectionHeaderCharacteristics & IMAGE_SCN_MEM_READ)
 			{
@@ -172,7 +182,7 @@ void MemVirtualProtect(char* pImageBuffer)
 			}
 			else
 			{
-				protect = PAGE_NOACCESS;
+				protect = PAGE_READWRITE;
 			}
 		}
 		VirtualProtect(pImageBuffer + pSectionHeader[i].VirtualAddress, pSectionHeader[i].Misc.VirtualSize, protect, &oldProtect);
@@ -204,16 +214,23 @@ int RunDllMain(char* pImageBuffer)
 /**
  * 自定义加载DLL文件
  */
-char* CustomLoadLibrary(const char* dllPath)
+DllInfo* CustomLoadLibrary(const char* dllPath)
 {
 	// 1. 加载 DLL 并将其转为镜像缓冲区
-	char* pImageBuffer = LoadDll2ImageBuffer(dllPath);
+	DllInfo* pDllInfo = LoadDll2ImageBuffer(dllPath);
+	char* pImageBuffer = (char*)pDllInfo->pDll;
 	if (pImageBuffer == NULL)
 	{
 		return NULL;
 	}
 	// 2. 加载 DLL 的导入表并修改 IAT
-	LoadImportsAndIAT(pImageBuffer);
+	int importResult = LoadImportsAndIAT(pImageBuffer);
+	if (importResult != 0)
+	{
+		cout << "加载导入表失败" << endl;
+		free(pImageBuffer);
+		return NULL;
+	}
 	// 3. 计算并修改重定位表
 	ChangeRelocationTable(pImageBuffer);
 	// 4. 设置地址保护
@@ -226,13 +243,14 @@ char* CustomLoadLibrary(const char* dllPath)
 		free(pImageBuffer);
 		return NULL;
 	}
-	return pImageBuffer;
+	return pDllInfo;
 }
 
 
-char* GetFunctionAddrByName(char* pImageBuffer, const char* functionName)
+void* GetFunctionAddrByName(DllInfo* pDllInfo, const char* functionName)
 {
 	// 加载 DOS 头和 NT 头
+	char* pImageBuffer = (char*)pDllInfo->pDll;
 	IMAGE_DOS_HEADER* pDosHeader = (IMAGE_DOS_HEADER*)pImageBuffer;
 	IMAGE_NT_HEADERS32* pNtHeaders = (IMAGE_NT_HEADERS32*)(pImageBuffer + pDosHeader->e_lfanew);
 	IMAGE_OPTIONAL_HEADER32* pOptionalHeader = &pNtHeaders->OptionalHeader;
@@ -253,3 +271,39 @@ char* GetFunctionAddrByName(char* pImageBuffer, const char* functionName)
 	}
 	return NULL;
 }
+
+int FreeLibrary(DllInfo* pDllInfo)
+{
+	if (pDllInfo == NULL || pDllInfo->pDll == NULL)
+	{
+		return -1;
+	}
+
+	char* pImageBuffer = (char*)pDllInfo->pDll;
+
+	// 恢复内存保护属性
+	// 加载DOS头和NT头
+	IMAGE_DOS_HEADER* pDosHeader = (IMAGE_DOS_HEADER*)pImageBuffer;
+	IMAGE_NT_HEADERS32* pNtHeaders = (IMAGE_NT_HEADERS32*)(pImageBuffer + pDosHeader->e_lfanew);
+	IMAGE_OPTIONAL_HEADER32* pOptionalHeader = &pNtHeaders->OptionalHeader;
+	IMAGE_FILE_HEADER* pFileHeader = &pNtHeaders->FileHeader;
+
+	// 遍历节表，恢复每个节的内存保护属性为 PAGE_READWRITE
+	IMAGE_SECTION_HEADER* pSectionHeader = (IMAGE_SECTION_HEADER*)((char*)pNtHeaders + sizeof(IMAGE_NT_HEADERS32));
+	for (int i = 0; i < pFileHeader->NumberOfSections; i++)
+	{
+		DWORD oldProtect = 0;
+		// 恢复为可读写属性，使内存可以被释放
+		VirtualProtect(pImageBuffer + pSectionHeader[i].VirtualAddress, pSectionHeader[i].Misc.VirtualSize, PAGE_READWRITE, &oldProtect);
+	}
+
+	// 释放DLL镜像缓冲区
+	free(pImageBuffer);
+	pDllInfo->pDll = NULL;
+
+	// 释放DllInfo结构体
+	free(pDllInfo);
+
+	return 0;
+}
+

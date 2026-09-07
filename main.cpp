@@ -7,19 +7,28 @@ using namespace std;
 
 int main()
 {
-	char* dllInfo = CustomLoadLibrary("D:\\Code\\Learn\\cpp_dll_demo\\Debug\\cpp_dll_demo.dll");
-	if (dllInfo == NULL)
+	DllInfo* pDllInfo = CustomLoadLibrary("D:\\Code\\Learn\\windows_reverse\\pe_format\\cpp_dll_demo\\Debug\\cpp_dll_demo.dll");
+	if (pDllInfo == NULL)
 	{
 		cout << "Failed to load DLL." << endl;
+		return 1;
 	}
-	else
-	{
-		cout << "DLL loaded successfully." << endl;
-	}
+	cout << "DLL loaded successfully." << endl;
 	// Add 函数 两个 int 参数，返回 int
 	typedef int(*AddFunc)(int, int);
-	AddFunc add = (AddFunc)GetFunctionAddrByName(dllInfo, "Add");
+	AddFunc add = (AddFunc)GetFunctionAddrByName(pDllInfo, "Add");
+	if (add == NULL)
+	{
+		cout << "Failed to get function address." << endl;
+		FreeLibrary(pDllInfo);
+		return 1;
+	}
 	int result = add(3, 5);
 	printf("Add(3, 5) = %d\n", result);
+
+	// 清理资源：释放加载的 DLL 内存
+	FreeLibrary(pDllInfo);
+	pDllInfo = NULL;
+
 	return 0;
 }
